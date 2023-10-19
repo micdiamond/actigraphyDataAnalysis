@@ -1,0 +1,1245 @@
+---
+title: "Act-30-Cleaned for submission"
+output:
+  word_document: default
+  html_notebook: default
+  pdf_document: default
+---
+# Setting up data
+## Packages
+```{r}
+library(nlme)
+library(tidyverse)
+library(zoo)
+library(ggplot2)
+library(stats)
+library(moments) #Library for skewness and kirtosis
+library(psychometric)
+```
+
+## Load the data
+```{r}
+setwd("~/Documents/0_Psychology_Studies_University\ /1Honours_Swin_Uni/1-Thesis-Honours/1_Greg_Projects/1_Honours_Project/2_honours_data")
+act <- read_csv("MLMAlldata_NA_1Jun.csv",na = c("", "NA"))
+names(act) <- make.names(names(act))
+#Remove unnecessary variables
+act <- subset(act, select = -c(SubjPeriod, SubjDate, Mesor, Amplitude, ABSAmp, A2, Phase, H2, CQ, IV, M10, L5, AMP, TST, SE, WASO))
+act <- subset(act, select = -c(M10.onset, L5.onset, Cbedsleep., Cbedwake., Cawake., Cbedrest.))
+```
+# Data Preparation CMOOD
+# Exclude participants
+```{r}
+# In order: act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02" | act$ID=="rhk09" | act$ID=="jh09" | act$ID=="jh11" | act$ID=="rhk05" | act$ID=="rhk03" | act$ID=="jh04" | act$ID=="rhk07"
+
+is.na(act$RA) <- act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02"
+is.na(act$Cmood) <- act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02"
+is.na(act$CmoodB) <- act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02"
+```
+
+## Lag Cmood
+```{r}
+act$LagCmood_Outliers_Inc <- sapply(1:nrow(act), function(x) act$Cmood[x+1])
+
+## LagCmood_Outliers_Exc Outliers excluded
+act$LagCmood_Outliers_Exc <- act$LagCmood_Outliers_Inc  
+meanLagCmood <- mean(act$LagCmood_Outliers_Inc, na.rm = TRUE)
+SDLagCmood <- sd(act$LagCmood_Outliers_Inc, na.rm = TRUE)
+act$outlierLagCmood <- ifelse(act$LagCmood_Outliers_Inc > meanLagCmood + 2*SDLagCmood | act$LagCmood_Outliers_Inc <  meanLagCmood - 2*SDLagCmood,TRUE,FALSE) 
+is.na(act$LagCmood_Outliers_Exc) <- act$outlierLagCmood == TRUE
+#If na.rm is TRUE then missing values are removed before computation proceeds.
+# RA Outliers excluded CODED
+#If na.rm is TRUE then missing values are removed before computation proceeds.
+```
+
+## Moving Collumns Around (Moving and CmoodB after lagCMood)
+```{r}
+act$CmoodB2<-act$CmoodB
+act <- subset(act, select = -c(CmoodB))
+act$CmoodB<-act$CmoodB2
+act <- subset(act, select = -c(CmoodB2))
+```
+
+## LagCmoodB_Outliers_Inc 
+```{r}
+act$LagCmoodB_Outliers_Inc <- sapply(1:nrow(act), function(x) act$CmoodB[x+1])
+```
+
+## LagCmoodC
+```{r}
+## Cmood C analysis (My new variable, removes values between 40 and 60 as Bower says these are normal mood, and only analyses pathological mood)
+act$LagCmoodC_Outliers_Inc <- act$LagCmoodB_Outliers_Inc
+is.na(act$LagCmoodC_Outliers_Inc) <- act$LagCmoodC_Outliers_Inc>=40
+```
+
+# RS Notes
+<!-- 40 = na  -->
+<!-- max(cmoodC) = 39 -->
+<!-- min(cmoodc) = 0 -->
+# Reverse Scored CmoodC
+```{r}
+## Moving Collumns Around 
+act$LagCmoodC_Outliers_Inc2<-act$LagCmoodC_Outliers_Inc
+act <- subset(act, select = -c(LagCmoodC_Outliers_Inc))
+act$LagCmoodC_Outliers_Inc<-act$LagCmoodC_Outliers_Inc2
+act <- subset(act, select = -c(LagCmoodC_Outliers_Inc2))
+
+act$ThirtyNine_maxCmoodC <- act$LagCmoodC_Outliers_Inc
+act$ThirtyNine_maxCmoodC <- 39
+#Reverse score transformation 
+# 0 becomes 40. 39 becomes 1, so scale is between 1 and 40
+act$RSLagCmoodC <- act$ThirtyNine_maxCmoodC + 1 - act$LagCmoodC_Outliers_Inc 
+#Remove intermediate variable 
+act <- subset(act, select = -c(ThirtyNine_maxCmoodC))
+
+# Test to make sure the correlation = -1 (it does).
+# cor(act$RSLagCmoodC, act$LagCmoodC_Outliers_Inc,  method = "pearson", use = "complete.obs")
+```
+
+
+
+# EXPLANATION OF VARIABLE:
+## Depression <40 (0-39 is pathological)
+## "{Bauer, 2006 #2141} define pathological mood variation as scores above 60 (hypo/mania) and below 40 (depression). Mood scores between 40 and 60 are considered nonpathological daily mood variations." Ben Phd p7
+## Bauer 2006 - A mood entry less than 40 was considered depression, 40–60 euthymia, and greater than 60 hypomania/ mania.
+## (so removing values => 40 instead of > 40) 
+
+## 2sd per participant - Attempt to exclude CMood outliers 
+```{r}
+  LagCmoodC_2sd_per_participant <- act %>%
+  group_by(ID) %>%
+  mutate_at(vars(LagCmoodC_Outliers_Inc), ~replace(.x, abs(scale(.x)) >= 2, NA))
+  act$LagCmoodC_2sd_per_participant <-LagCmoodC_2sd_per_participant$LagCmoodC_Outliers_Inc
+```
+
+## 3sd per participant - Attempt to exclude CMood outliers per participant
+```{r}
+  LagCmoodC_3sd_per_participant <- act %>%
+  group_by(ID) %>%
+  mutate_at(vars(LagCmoodC_Outliers_Inc), ~replace(.x, abs(scale(.x)) >= 3, NA))
+  act$LagCmoodC_3sd_per_participant <-LagCmoodC_3sd_per_participant$LagCmoodC_Outliers_Inc
+```
+
+## LagCmoodC Outliers excluded
+```{r}
+### 2 sd
+act$LagCmoodC_2sdOutliers_Exc <- act$LagCmoodC_Outliers_Inc  
+meanLagCmoodC <- mean(act$LagCmoodC_Outliers_Inc, na.rm = TRUE)
+SDLagCmoodC <- sd(act$LagCmoodC_Outliers_Inc, na.rm = TRUE)
+act$outlier2sdLagCmoodC <- ifelse(act$LagCmoodC_Outliers_Inc > meanLagCmoodC + 2*SDLagCmoodC | act$LagCmoodC_Outliers_Inc <  meanLagCmoodC - 2*SDLagCmoodC,TRUE,FALSE) 
+is.na(act$LagCmoodC_2sdOutliers_Exc) <- act$outlier2sdLagCmoodC == TRUE
+```
+```{r}
+### 3 sd
+act$LagCmoodC_3sdOutliers_Exc <- act$LagCmoodC_Outliers_Inc  
+act$outlier3sdLagCmoodC <- ifelse(act$LagCmoodC_Outliers_Inc > meanLagCmoodC + 3*SDLagCmoodC | act$LagCmoodC_Outliers_Inc <  meanLagCmoodC - 3*SDLagCmoodC,TRUE,FALSE) 
+is.na(act$LagCmoodC_3sdOutliers_Exc) <- act$outlier3sdLagCmoodC == TRUE
+```
+
+### NEW Per Participant Compairing number of datapoints excluded between 2sd and 3sd
+```{r}
+##UP TO HERE
+# act$outlier2sdLagCmoodC
+# # vs
+# act$outlier3sdLagCmoodC 
+print("Total data count for CmoodC")
+CmoodC_DataCount<-length(which(!is.na(act$LagCmoodC_Outliers_Inc)))
+CmoodC_DataCount
+print(">2sd: Number of cMoodB data points:")
+sd2numberExcluded<-length(which(!is.na(act$LagCmoodC_2sd_per_participant)))
+sd2numberExcluded
+print(">3sd: Number of cMoodB data points excluded:")
+sd3numberExcluded<-length(which(!is.na(act$LagCmoodC_3sd_per_participant)))
+sd3numberExcluded
+print("Difference in data numbers between 2sd and 3 sd")
+sd2numberExcluded - sd3numberExcluded
+
+print("CmoodC data count greater than 3 sd")
+CmoodC_DataCount - sd3numberExcluded
+
+```
+# CmoodC <|>3sd data count
+### Compairing number of datapoints excluded between 2sd and 3sd
+```{r}
+# act$outlier2sdLagCmoodC
+# # vs
+# act$outlier3sdLagCmoodC 
+print("Total data count for CmoodC")
+CmoodC_DataCount<-length(which(!is.na(act$LagCmoodC_Outliers_Inc)))
+CmoodC_DataCount
+print(">2sd: Number of cMoodC data points excluded:")
+sd2numberExcluded<-length(which(act$outlier2sdLagCmoodC==TRUE))
+sd2numberExcluded
+print(">3sd: Number of cMoodC data points excluded:")
+sd3numberExcluded<-length(which(act$outlier3sdLagCmoodC==TRUE))
+sd3numberExcluded
+print("Difference in data numbers between 2sd and 3 sd")
+sd2numberExcluded - sd3numberExcluded
+```
+
+# Data Preparation RA
+## Moving Collumns Around (Moving RA after CMood collumns)
+```{r}
+act$RA2<-act$RA
+act <- subset(act, select = -c(RA))
+act$RA<-act$RA2
+act <- subset(act, select = -c(RA2))
+```
+
+## 7 day RA averages
+### Averaging prep - Init-6 variable
+```{r}
+# Labelling init seven with new collum to reuse this code for each new 7dayave variable. Used to remove first 6 values for each 7 day average to avoid participant overlap when averaging accross 7 days
+#See: Fixing first values for the 7 day averages (overlapping participants)
+act$FirstSixValues <- act$Sequence
+act$FirstSixValues[act$Sequence == 36 | act$Sequence == 37 | act$Sequence == 38 | act$Sequence == 39 | act$Sequence == 40 | act$Sequence == 41 | act$Sequence == 253 | act$Sequence == 254 | act$Sequence == 255 | act$Sequence == 256 | act$Sequence == 257 | act$Sequence == 258 | act$Sequence == 373 | act$Sequence == 374 | act$Sequence == 375 | act$Sequence == 376 | act$Sequence == 377 | act$Sequence == 378 | act$Sequence == 605 | act$Sequence == 606 | act$Sequence == 607 | act$Sequence == 608 | act$Sequence == 609 | act$Sequence == 610 | act$Sequence == 780 | act$Sequence == 781 | act$Sequence == 782 | act$Sequence == 783 | act$Sequence == 784 | act$Sequence == 785 | act$Sequence == 1009 | act$Sequence == 1010 | act$Sequence == 1011 | act$Sequence == 1012 | act$Sequence == 1013 | act$Sequence == 1014 | act$Sequence == 1148 | act$Sequence == 1149 | act$Sequence == 1150 | act$Sequence == 1151 | act$Sequence == 1152 | act$Sequence == 1153 | act$Sequence == 1332 | act$Sequence == 1333 | act$Sequence == 1334 | act$Sequence == 1335 | act$Sequence == 1336 | act$Sequence == 1337 | act$Sequence == 1346 | act$Sequence == 1347 | act$Sequence == 1348 | act$Sequence == 1349 | act$Sequence == 1350 | act$Sequence == 1351 | act$Sequence == 1445 | act$Sequence == 1446 | act$Sequence == 1447 | act$Sequence == 1448 | act$Sequence == 1449 | act$Sequence == 1450] <- "initSix"
+```
+
+## 7) RA_Sev - RA 7 day average, 
+```{r}
+## Rolling average RA_Sev
+act$RA_Sev<- rollmean(act$RA, 7, fill = NA, align = 'right')
+#Fixing first values for the 7 day averages (overlapping participants)
+is.na(act$RA_Sev) <- act$FirstSixValues == "initSix"
+```
+
+### RA7 Data Count
+```{r}
+RA7_DataCount<-length(which(!is.na(act$RA_Sev)))
+RA7_DataCount
+```
+
+### Removing Multivariate outliers
+```{r}
+# Multivariate outliers are Irrelivant to us
+# Uncomment to check if pattern of findings are unchanged
+# is.na(act$LagCmoodC_Outliers_Inc) <- act$Sequence == 1300 | act$Sequence == 1312 | act$Sequence == 1198
+# is.na(act$RA_Sev) <- act$Sequence == 1300 | act$Sequence == 1312 | act$Sequence == 1198
+```
+
+# Transformations
+23) Squaring LagCmood
+```{r}
+# Squared transformation RA_Sv
+act$RA_Sev_squared<- act$RA_Sev^2
+
+# Cubed transformation RA_Sv
+act$RA_Sev_cubed<- act$RA_Sev^3
+
+act$RA_Sev_cubed<- act$RA_Sev^3
+
+# Log transformation
+act$RA_Sev_cubed<- log(act$RA_Sev)
+
+# Inverse transformation
+act$logRA_Sev<- log(act$RA_Sev)
+
+act$inverseRA_Sev<-1/(act$RA_Sev^3)
+```
+
+
+
+
+# Cmood transformations
+```{r}
+# Transformations
+# Squared transformation RA_Sv
+act$Cmood_squared<- act$RSLagCmoodC
+
+# Cubed transformation RA_Sv
+act$Cmood_cubed<- act$RSLagCmoodC
+
+
+# Log transformation
+act$logcmood<- log(act$RSLagCmoodC)
+
+# Inverse transformation
+act$inverseCmood<-1/(act$RSLagCmoodC)
+```
+
+```{r}
+xUntransformedModel <- lm( logcmood ~ logRA_Sev, act)
+xxRAsevSquaredModel <- lm(inverseCmood ~ inverseRA_Sev, act)
+xxxRAsevCubedModel <- lm(LagCmood_Outliers_Inc ~ logRA_Sev, act)
+```
+
+
+## Attempt to exclude RA_sev outliers per participant
+```{r}
+  RA_Sev_2SD <- act %>%
+  group_by(ID) %>%
+  mutate_at(vars(RA_Sev), ~replace(.x, abs(scale(.x)) >= 2, NA))
+  act$RA_Sev_2sd_per_participant <-RA_Sev_2SD$RA_Sev
+```
+
+
+## Attempt to exclude RA_sev outliers per participant
+```{r}
+  RA_Sev_3SD <- act %>%
+  group_by(ID) %>%
+  mutate_at(vars(RA_Sev), ~replace(.x, abs(scale(.x)) >= 3, NA))
+  act$RA_Sev_3sd_per_participant <-RA_Sev_3SD$RA_Sev
+```
+
+## RA OUTLIERS
+## RA_Sev_2sdOutliers_Exc_Aft 
+## 2 SD RA_Sev_Outliers excluded - 2SD AFTER doing rolling average
+```{r}
+act$RA_Sev_2sdOutliers_Exc_Aft <- act$RA_Sev
+SD_RA_Sev <- sd(act$RA_Sev, na.rm = TRUE)
+mean_RA_Sev <- mean(act$RA_Sev, na.rm = TRUE)
+act$outlier2sd_list_RA_Sev <- ifelse(act$RA_Sev > mean_RA_Sev + 2*SD_RA_Sev | act$RA_Sev <  mean_RA_Sev - 2*SD_RA_Sev,TRUE,FALSE)
+is.na(act$RA_Sev_2sdOutliers_Exc_Aft) <- act$outlier2sd_list_RA_Sev == TRUE
+```
+
+## 3sd RA_Sev_Outliers excluded - 3SD AFTER doing rolling average
+```{r}
+act$RA_Sev_3sdOutliers_Exc_Aft <- act$RA_Sev
+act$outlier3sd_list_RA_Sev <- ifelse(act$RA_Sev > mean_RA_Sev + 3*SD_RA_Sev | act$RA_Sev <  mean_RA_Sev - 3*SD_RA_Sev,TRUE,FALSE)
+is.na(act$RA_Sev_3sdOutliers_Exc_Aft) <- act$outlier3sd_list_RA_Sev == TRUE
+```
+
+## GpMC
+## GpMC RAsev - outliers included (RA_Sev -> GpMC)
+```{r}
+# Getting mean for ID
+GroupMeans_RA_Sev<-aggregate(act$RA_Sev, list(act$ID), mean, na.rm=TRUE)
+#Creating new data frame
+names(GroupMeans_RA_Sev)<-c("ID", "RA_Sev_Person_Mean")
+#Merging the new data frame with act, using ID to do the merge
+act<-merge(act, GroupMeans_RA_Sev, by = "ID")
+# Person mean centering by subtraction - creates new variable
+act$RA_Sev_GpMC <- act$RA_Sev - act$RA_Sev_Person_Mean
+
+#Remove intermediate mean variable (If this is not run, can not re-run line above)
+act <- subset(act, select = -c(RA_Sev_Person_Mean))
+```
+
+## GpMC RAsev (2sd) RA_Sev_2sdOutliers_Exc_Aft
+```{r}
+# Getting mean for ID
+GroupMeansRA_Sev_2sdOutliers_Exc_Aft<-aggregate(act$RA_Sev_2sdOutliers_Exc_Aft, list(act$ID), mean, na.rm=TRUE)
+#Creating new data frame
+names(GroupMeansRA_Sev_2sdOutliers_Exc_Aft)<-c("ID", "RA_Sev_2sdOutliers_Exc_Aft_Person_Mean")
+#Merging the new data frame with act, using ID to do the merge
+act<-merge(act, GroupMeansRA_Sev_2sdOutliers_Exc_Aft, by = "ID")
+# Person mean centering by subtraction - creates new variable
+act$RA_Sev_2sdOutliers_Exc_Aft_GpMC <- act$RA_Sev_2sdOutliers_Exc_Aft - act$RA_Sev_2sdOutliers_Exc_Aft_Person_Mean
+#Remove intermediate mean variable (If this is not run, can not re-run line above)
+act <- subset(act, select = -c(RA_Sev_2sdOutliers_Exc_Aft_Person_Mean))
+```
+
+##GpMC (3sd outliers removed)
+```{r}
+# Getting mean for ID
+GroupMeansRA_Sev_3sdOutliers_Exc_Aft<-aggregate(act$RA_Sev_3sdOutliers_Exc_Aft, list(act$ID), mean, na.rm=TRUE)
+#Creating new data frame
+names(GroupMeansRA_Sev_3sdOutliers_Exc_Aft)<-c("ID", "RA_Sev_Outliers_Exc_3sd_Aft_Person_Mean")
+#Merging the new data frame with act, using ID to do the merge
+act<-merge(act, GroupMeansRA_Sev_3sdOutliers_Exc_Aft, by = "ID")
+# Person mean centering by subtraction - creates new variable
+act$RA_Sev_3sdOutliers_Exc_Aft_GPmC <- act$RA_Sev_3sdOutliers_Exc_Aft - act$RA_Sev_Outliers_Exc_3sd_Aft_Person_Mean
+
+#Remove intermediate mean variable (If this is not run, can not re-run line above)
+act <- subset(act, select = -c(RA_Sev_Outliers_Exc_3sd_Aft_Person_Mean))
+```
+
+## CLEAN WORKSPACE to Remove unused columns so I can see what I'm working on 
+```{r}
+act <- subset(act, select = -c(CmoodA, LagCmood_Outliers_Exc, outlierLagCmood, FirstSixValues, outlier2sd_list_RA_Sev, outlier3sd_list_RA_Sev))
+```
+
+# RA7 <|> 3sd data count
+### NEW Per Participant Compairing number of datapoints excluded between 2sd and 3sd
+```{r}
+##UP TO HERE
+# act$outlier2sdLagCmoodC
+# # vs
+# act$outlier3sdLagCmoodC 
+print("Total data count for RA_Sev")
+RA_Sev_DataCount<-length(which(!is.na(act$RA_Sev)))
+RA_Sev_DataCount
+# print(">2sd: Number of cMoodBRA_Sevdata points:")
+# sd2numberExcluded<-length(which(!is.na(act$LagCmoodC_2sd_per_participant)))
+# sd2numberExcluded
+print(">3sd: Number of RA_Sev data points excluded:")
+sd3numberExcluded<-length(which(!is.na(act$RA_Sev_3sdOutliers_Exc_Aft)))
+sd3numberExcluded
+
+print("RA_Sev data count greater than 3 sd")
+RA_Sev_DataCount - sd3numberExcluded
+
+```
+
+# Counting Data Numbers
+## RA7
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$RA_Sev)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$RA_Sev)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$RA_Sev)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$RA_Sev)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$RA_Sev)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$RA_Sev)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$RA_Sev)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$RA_Sev)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$RA_Sev)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$RA_Sev)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$RA_Sev)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+# plot(RADataTable, main = "RA Data")
+```
+
+## RA_Sev_3sd_per_participant
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$RA_Sev_3sd_per_participant)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$RA_Sev_3sd_per_participant)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$RA_Sev_3sd_per_participant)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$RA_Sev_3sd_per_participant)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$RA_Sev_3sd_per_participant)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$RA_Sev_3sd_per_participant)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$RA_Sev_3sd_per_participant)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$RA_Sev_3sd_per_participant)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$RA_Sev_3sd_per_participant)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$RA_Sev_3sd_per_participant)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$RA_Sev_3sd_per_participant)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+# plot(RADataTable, main = "RA Data")
+```
+
+## RA_Sev_2sd_per_participant
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$RA_Sev_2sd_per_participant)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$RA_Sev_2sd_per_participant)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$RA_Sev_2sd_per_participant)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$RA_Sev_2sd_per_participant)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$RA_Sev_2sd_per_participant)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$RA_Sev_2sd_per_participant)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$RA_Sev_2sd_per_participant)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$RA_Sev_2sd_per_participant)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$RA_Sev_2sd_per_participant)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$RA_Sev_2sd_per_participant)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$RA_Sev_2sd_per_participant)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+## Cmood
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$Cmood)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$Cmood)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$Cmood)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$Cmood)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$Cmood)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$Cmood)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$Cmood)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$Cmood)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$Cmood)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$Cmood)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$Cmood)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+## LagCmoodC_Outliers_Inc
+<!-- ## LagCmood_Excluded_RA_Sev_NA Counting data numbers -->
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$LagCmoodC_Outliers_Inc)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$LagCmoodC_Outliers_Inc)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$LagCmoodC_Outliers_Inc)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$LagCmoodC_Outliers_Inc)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$LagCmoodC_Outliers_Inc)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$LagCmoodC_Outliers_Inc)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$LagCmoodC_Outliers_Inc)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$LagCmoodC_Outliers_Inc)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$LagCmoodC_Outliers_Inc)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$LagCmoodC_Outliers_Inc)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$LagCmoodC_Outliers_Inc)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+# Count
+## LagCmoodC_Outliers_Inc - REORDERED
+<!-- ## LagCmood_Excluded_RA_Sev_NA Counting data numbers -->
+```{r}
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$LagCmoodC_Outliers_Inc)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$LagCmoodC_Outliers_Inc)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$LagCmoodC_Outliers_Inc)))
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$LagCmoodC_Outliers_Inc)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$LagCmoodC_Outliers_Inc)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$LagCmoodC_Outliers_Inc)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$LagCmoodC_Outliers_Inc)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$LagCmoodC_Outliers_Inc)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$LagCmoodC_Outliers_Inc)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$LagCmoodC_Outliers_Inc)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$LagCmoodC_Outliers_Inc)))
+RADataTable<-c(RAjh12, RArhk08, RArhk12, RAjh02, RArhk09, RAjh09, RAjh11, RArhk05, RArhk03, RAjh04, RArhk07)
+RADataTable
+```
+
+## LagCmoodC_3sd_per_participant
+<!-- ## LagCmood_Excluded_RA_Sev_NA Counting data numbers -->
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$LagCmoodC_3sd_per_participant)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$LagCmoodC_3sd_per_participant)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$LagCmoodC_3sd_per_participant)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$LagCmoodC_3sd_per_participant)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$LagCmoodC_3sd_per_participant)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$LagCmoodC_3sd_per_participant)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$LagCmoodC_3sd_per_participant)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$LagCmoodC_3sd_per_participant)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$LagCmoodC_3sd_per_participant)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$LagCmoodC_3sd_per_participant)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$LagCmoodC_3sd_per_participant)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+## LagCmoodC_2sd_per_participant
+<!-- ## LagCmood_Excluded_RA_Sev_NA Counting data numbers -->
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$LagCmoodC_2sd_per_participant)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$LagCmoodC_2sd_per_participant)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$LagCmoodC_2sd_per_participant)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$LagCmoodC_2sd_per_participant)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$LagCmoodC_2sd_per_participant)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$LagCmoodC_2sd_per_participant)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$LagCmoodC_2sd_per_participant)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$LagCmoodC_2sd_per_participant)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$LagCmoodC_2sd_per_participant)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$LagCmoodC_2sd_per_participant)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$LagCmoodC_2sd_per_participant)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+## LagCmoodC_3sdOutliers_Exc
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$LagCmoodC_3sdOutliers_Exc)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$LagCmoodC_3sdOutliers_Exc)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$LagCmoodC_3sdOutliers_Exc)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$LagCmoodC_3sdOutliers_Exc)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$LagCmoodC_3sdOutliers_Exc)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$LagCmoodC_3sdOutliers_Exc)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$LagCmoodC_3sdOutliers_Exc)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$LagCmoodC_3sdOutliers_Exc)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$LagCmoodC_3sdOutliers_Exc)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$LagCmoodC_3sdOutliers_Exc)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$LagCmoodC_3sdOutliers_Exc)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+## LagCmoodC_2sdOutliers_Exc
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$LagCmoodC_2sdOutliers_Exc)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$LagCmoodC_2sdOutliers_Exc)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$LagCmoodC_2sdOutliers_Exc)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$LagCmoodC_2sdOutliers_Exc)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$LagCmoodC_2sdOutliers_Exc)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$LagCmoodC_2sdOutliers_Exc)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$LagCmoodC_2sdOutliers_Exc)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$LagCmoodC_2sdOutliers_Exc)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$LagCmoodC_2sdOutliers_Exc)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$LagCmoodC_2sdOutliers_Exc)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$LagCmoodC_2sdOutliers_Exc)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+## RA_Sev_3sdOutliers_Exc_Aft
+# Missing data RA
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$RA_Sev)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$RA_Sev)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$RA_Sev)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$RA_Sev)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$RA_Sev)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$RA_Sev)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$RA_Sev)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$RA_Sev)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$RA_Sev)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$RA_Sev)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$RA_Sev)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+Total not Missing data when 4 participants are excluded
+```{r}
+sum(RAjh04, RAjh09, RAjh11, RArhk03, RArhk05, RArhk07, RArhk09)
+```
+
+Total not Missing data when 6 participants are excluded
+```{r}
+sum(RAjh04, RAjh11, RArhk03, RArhk05, RArhk07)
+```
+
+# Total Data RA
+```{r}
+RAjh02<-length(act[act$ID=="jh02",]$RA_Sev)
+RAjh04<-length(act[act$ID=="jh04",]$RA_Sev)
+RAjh09<-length(act[act$ID=="jh09",]$RA_Sev)
+RAjh11<-length(act[act$ID=="jh11",]$RA_Sev)
+RAjh12<-length(act[act$ID=="jh12",]$RA_Sev)
+RArhk03<-length(act[act$ID=="rhk03",]$RA_Sev)
+RArhk05<-length(act[act$ID=="rhk05",]$RA_Sev)
+RArhk07<-length(act[act$ID=="rhk07",]$RA_Sev)
+RArhk08<-length(act[act$ID=="rhk08",]$RA_Sev)
+RArhk09<-length(act[act$ID=="rhk09",]$RA_Sev)
+RArhk12<-length(act[act$ID=="rhk12",]$RA_Sev)
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+Total data when 4 participants are excluded
+```{r}
+sum(RAjh04, RAjh09, RAjh11, RArhk03, RArhk05, RArhk07, RArhk09)
+```
+
+Total data when 6 participants are excluded
+```{r}
+sum(RAjh04, RAjh11, RArhk03, RArhk05, RArhk07)
+```
+# Total missing RA data and proportion of data that is missing - missing RA data (4 participants excluded)
+```{r}
+1220-1136
+1136/1220
+```
+
+# Total missing RA data and proportion of data that is missing (6 participants excluded)
+```{r}
+1001-929
+929/1001
+```
+
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$RA_Sev_3sdOutliers_Exc_Aft)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+## RA_Sev_2sdOutliers_Exc_Aft
+```{r}
+RAjh02<-length(which(!is.na(act[act$ID=="jh02",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RAjh04<-length(which(!is.na(act[act$ID=="jh04",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RAjh09<-length(which(!is.na(act[act$ID=="jh09",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RAjh11<-length(which(!is.na(act[act$ID=="jh11",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RAjh12<-length(which(!is.na(act[act$ID=="jh12",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RArhk03<-length(which(!is.na(act[act$ID=="rhk03",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RArhk05<-length(which(!is.na(act[act$ID=="rhk05",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RArhk07<-length(which(!is.na(act[act$ID=="rhk07",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RArhk08<-length(which(!is.na(act[act$ID=="rhk08",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RArhk09<-length(which(!is.na(act[act$ID=="rhk09",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RArhk12<-length(which(!is.na(act[act$ID=="rhk12",]$RA_Sev_2sdOutliers_Exc_Aft)))
+RADataTable<-c(RAjh02, RAjh04, RAjh09, RAjh11, RAjh12, RArhk03, RArhk05, RArhk07, RArhk08, RArhk09, RArhk12)
+RADataTable
+```
+
+# **CUSTOMISABLE ASSUMPTION VARIABLES** 
+## Untransformed data
+```{r}
+# FOR ASSUMPTIONS 
+# act$xLagCmoodC <- act$LagCmoodC_Outliers_Inc
+# act$xxLagCmoodC <- act$LagCmoodC_2sd_per_participant
+# act$xxxLagCmoodC <- act$LagCmoodC_3sd_per_participant
+# 
+# act$x7RA <- act$RA_Sev_GpMC
+# act$xx7RA <- act$RA_Sev_2sd_per_participant
+# act$xxx7RA <- act$RA_Sev_3sd_per_participant
+# 
+# 
+# ## Models for assumption plots (6 Cmood values and 1 RA value
+# xUntransformedModel <- lm(LagCmoodC_Outliers_Inc ~ RA_Sev, act)
+# xxRAsevSquaredModel <- lm(LagCmoodC_2sd_per_participant ~ RA_Sev_2sd_per_participant, act)
+# xxxRAsevCubedModel <- lm(LagCmoodC_3sd_per_participant ~ RA_Sev_3sd_per_participant, act)
+```
+
+## Transformed data reordered
+```{r}
+# FOR ASSUMPTIONS 
+act$xLagCmoodC <- act$RSLagCmoodC
+# act$xLagCmoodC <- act$LagCmoodC_Outliers_Inc
+act$xxLagCmoodC <- act$LagCmoodC_Outliers_Inc
+act$xxxLagCmoodC <- act$LagCmoodC_Outliers_Inc
+
+act$xLagCmood <- act$xLagCmood
+act$xxLagCmood <- act$LagCmoodC_Outliers_Inc
+act$xxxLagCmood <- act$LagCmoodC_Outliers_Inc
+
+act$x7RA <- act$RA_Sev
+act$xx7RA <- act$RA_Sev_squared
+act$xxx7RA <- act$RA_Sev_cubed
+
+## Models for assumption plots (6 Cmood values and 1 RA value
+# xUntransformedModel <- lm(RSLagCmoodC ~ RA_Sev, act)
+# # xUntransformedModel <- lm(LagCmoodC_Outliers_Inc ~ RA_Sev, act)
+# xxRAsevSquaredModel <- lm(LagCmoodC_Outliers_Inc ~ RA_Sev_squared, act)
+# xxxRAsevCubedModel <- lm(LagCmoodC_Outliers_Inc ~ RA_Sev_cubed, act)
+```
+
+# Outliers
+## Checking CmoodB outliers included
+cooksd <- cooks.distance(xB)
+cooksd
+
+# Plot the Cook's Distance using the traditional 4/n criterion
+sample_size <- 1377
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4/sample_size, col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4/sample_size, names(cooksd),""), col="red")  # add labels
+
+# Data screening
+## First Plots (Commented out because runs slow and not that useful)
+```{r}
+# plot(act$x7RA, act$xLagCmoodA)
+# plot(act$xx7RA, act$xxLagCmoodA)
+# 
+# plot(act$x7RA, act$xLagCmoodB)
+# plot(act$xx7RA, act$xxLagCmoodB)
+# 
+# plot(act$x7RA, act$xLagCmoodC)
+# plot(act$xx7RA, act$xxLagCmoodC)
+```
+
+
+## (0) Outlier Visualisation 
+
+```{r}
+print("RA_Sev")
+dat <- ggplot2::mpg
+summary(act$RA_Sev)
+print("LagCmoodC")
+dat <- ggplot2::mpg
+summary(act$LagCmoodC_Outliers_Inc)
+
+```
+
+```{r}
+CmoodC_0_quartile_data_count<-length(which(!is.na(act$LagCmoodC_Outliers_Inc)))
+CmoodC_0_quartile_data_count<-length(which(!is.na(act$LagCmoodC_Outliers_Inc)&&which(act$LagCmoodC_Outliers_Inc<.9173)))
+RA7_0_quartile_data_count<-length(which(act$RA_Sev<.9173))
+RA7_0_quartile_data_count
+RA7_4_quartile_data_count<-length(which(act$RA_Sev>.9455))
+RA7_4_quartile_data_count
+
+print("CmoodC data count (not NA")
+CmoodC__data_count<-length(which(!is.na(act$LagCmoodC_Outliers_Inc)))
+CmoodC__data_count
+
+print("CmoodC_0_quartile_data_count")
+
+CmoodC_0_quartile_data_count<-length(which(act$LagCmoodC_Outliers_Inc<30))
+CmoodC_0_quartile_data_count
+
+print("CmoodC_4_quartile_data_count")
+CmoodC_4_quartile_data_count<-length(which(act$LagCmoodC_Outliers_Inc>30))
+CmoodC_4_quartile_data_count
+
+print("CmoodC_30_data_count")
+CmoodC_30_data_count<-length(which(act$LagCmoodC_Outliers_Inc==30))
+CmoodC_30_data_count
+
+print("CmoodC not 30")
+CmoodC_not30_data_count<-length(which(act$LagCmoodC_Outliers_Inc!=30))
+CmoodC_not30_data_count
+
+print("CmoodC_31_data_count")
+CmoodC_31_data_count<-length(which(act$LagCmoodC_Outliers_Inc==31))
+CmoodC_31_data_count
+
+
+# or make it into a new variable, as in
+# sd3numberExcluded<-length(which(!is.na(act$LagCmoodC_3sd_per_participant)))
+
+```
+
+```{r}
+RAplot <- ggplot(data = act, mapping = aes(x = ID, y = RA_Sev))
+RAplot + geom_boxplot() + ggtitle("x7RA") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+# *Whole sample boxplots*
+```{r}
+RAplot <- ggplot(data = act, mapping = aes(y = RA_Sev))
+RAplot + geom_boxplot() + ggtitle("7RA") + theme(plot.title = element_text(hjust = 0.5))
+
+RAplot <- ggplot(data = act, mapping = aes(y = LagCmoodC_Outliers_Inc))
+RAplot + geom_boxplot() + ggtitle("CmoodC") + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+#
+RAplot <- ggplot(data = act, mapping = aes(x = ID, y = x7RA))
+RAplot + geom_boxplot() + ggtitle("x7RA") + theme(plot.title = element_text(hjust = 0.5))
+# RAplot_Outliers_Removed <- ggplot(data = act, mapping = aes(x = ID, y = xx7RA))
+# RAplot_Outliers_Removed + geom_boxplot() + ggtitle("xx7RA") + theme(plot.title = element_text(hjust = 0.5))
+# <!-- #  -->
+# <!-- # Cmoodplot <- ggplot(data = act, mapping = aes(x = ID, y = xLagCmoodA)) -->
+# <!-- # Cmoodplot + geom_boxplot() + ggtitle("xCmoodA") + theme(plot.title = element_text(hjust = 0.5)) -->
+# <!-- #  -->
+# <!-- # Cmoodplot_Outliers_Removed <- ggplot(data = act, mapping = aes(x = ID, y = xxLagCmoodA)) -->
+# <!-- # Cmoodplot_Outliers_Removed + geom_boxplot() + ggtitle("xxCmoodA") + theme(plot.title = element_text(hjust = 0.5)) -->
+# <!-- #  -->
+# <!-- # Cmoodplot <- ggplot(data = act, mapping = aes(x = ID, y = xLagCmoodB)) -->
+# <!-- # Cmoodplot + geom_boxplot() + ggtitle("xCmoodB") + theme(plot.title = element_text(hjust = 0.5)) -->
+# <!-- #  -->
+# <!-- # Cmoodplot_Outliers_Removed <- ggplot(data = act, mapping = aes(x = ID, y = xxLagCmoodB)) -->
+# <!-- # Cmoodplot_Outliers_Removed + geom_boxplot() + ggtitle("xxCmoodB") + theme(plot.title = element_text(hjust = 0.5)) -->
+# <!-- #  -->
+# <!-- # Cmoodplot <- ggplot(data = act, mapping = aes(x = ID, y = xLagCmoodC)) -->
+# <!-- # Cmoodplot + geom_boxplot() + ggtitle("xCmoodC") + theme(plot.title = element_text(hjust = 0.5)) -->
+# <!-- #  -->
+# <!-- # Cmoodplot_Outliers_Removed <- ggplot(data = act, mapping = aes(x = ID, y = xxLagCmoodC)) -->
+# <!-- # Cmoodplot_Outliers_Removed + geom_boxplot() + ggtitle("xxCmoodC") + theme(plot.title = element_text(hjust = 0.5)) -->
+```
+
+
+<!-- ### Grid Plots per participant - Not relevant -->
+```{r}
+# Line with Outliers
+RALine_Outliers <- ggplot(act, aes(x7RA, xLagCmood))
+RALine_Outliers + geom_smooth(aes(colour = ID), method = "lm", se = F)
+# Line No Outliers
+# RALine_NoOutliers <- ggplot(act, aes(xx7RA, xxLagCmood))
+# RALine_NoOutliers + geom_smooth(aes(colour = ID), method = "lm", se = F)
+
+# Grid With outliers
+RAgrid_Outliers<-ggplot(act, aes(x7RA, xLagCmood))
+RAgrid_Outliers + geom_point(aes(colour = ID)) + geom_smooth(aes(colour = ID), method = "lm", se = F) +
+labs(x = "x7RA", y = "xLagCmood")
+
+
+
+# Grid With outliers
+RAgrid_Outliers<-ggplot(act, aes(x7RA, xLagCmood))
+RAgrid_Outliers + geom_point(aes(colour = ID)) + geom_smooth(aes(colour = ID), method = "lm", se = F) + facet_wrap(~ID, ncol = 5) +
+labs(x = "x7RA", y = "xLagCmood")
+
+# <!-- # Grid No Outliers -->
+# <!-- RAgrid_NoOutliers<-ggplot(act, aes(xx7RA, xxLagCmood)) -->
+# <!-- RAgrid_NoOutliers + geom_point(aes(colour = ID)) + geom_smooth(aes(colour = ID), method = "lm", se = F) + facet_wrap(~ID, ncol = 5) + -->
+# <!-- labs(x = "xx7RA", y = "xxLagCmood") -->
+``` 
+
+# *Drawing a graph for each participant (unused)*
+```{r}
+actDrawing<-act
+#Deketes rows with partcipatns omitted
+actDrawing<-act[!(act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02"),]
+# is.na(actDrawing$ID) <- act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02"
+# subset(actDrawing, act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02")
+
+# Grid With outliers
+RAgrid_Outliers<-ggplot(actDrawing, aes(x7RA, xLagCmood))
+RAgrid_Outliers + geom_point(aes(colour = ID)) + geom_smooth(aes(colour = ID), method = "lm", se = F) + 
+  facet_wrap(~ID, ncol = 4) + 
+  # theme_apa() +
+labs(x = "Relative Amplitude Seven Day Average (RA7)", y = "Mood Dysregulation Score")
+```
+
+# *Drawing a graph for each participant (unused)*
+```{r}
+actDrawing<-act
+#Deketes rows with partcipatns omitted
+actDrawing<-act[!(act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02"),]
+# is.na(actDrawing$ID) <- act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02"
+# subset(actDrawing, act$ID=="jh12" | act$ID=="rhk08" | act$ID=="rhk12" | act$ID=="jh02")
+
+# Grid With outliers
+RAgrid_Outliers<-ggplot(actDrawing, aes(x7RA, xLagCmood))
+RAgrid_Outliers + geom_point(aes(colour = Initials)) + geom_smooth(aes(colour = Initials), method = "lm", se = F) + 
+  facet_wrap(~Initials, ncol = 4) + 
+  # theme_apa() +
+labs(x = "Relative Amplitude Seven Day Average (RA7)", y = "Mood Dysregulation Score")
+```
+
+
+## Raw data normality
+### raw plots
+Resonse variable is half normal.
+Not a problem because: The assumptions for linear multilevel models are generally about the residuals, not about the variables used in the models themselves.
+```{r}
+hist(act$xLagCmoodC, xlim = range(0:40))
+hist(act$xxLagCmoodC, xlim = range(0:40))
+hist(act$xxxLagCmoodC, xlim = range(0:40))
+
+hist(act$x7RA)
+hist(act$xx7RA)
+hist(act$xxx7RA)
+
+```
+
+
+
+# Unnecessary Assumptions
+## *N/A - skip* - Absence of collinearity
+**N/A because we only have one predictor - collinearity is an issue when predictors are correlated with each other**
+
+## Normality
+### Shapiro-Wilk test
+```{r}
+shapiro.test(act$x7RA)
+shapiro.test(act$xLagCmoodC)
+```
+
+## Skewness and kirtosis
+Skewness: This value implies that the distribution of the data is slightly skewed to the left or negatively skewed. It is skewed to the left because the computed value is negative, and is slightly, because the value is close to zero. 
+```{r}
+# RA
+print("RA")
+print("Skewness of xRA")
+skewness(act$x7RA, na.rm=TRUE)
+
+print("Estimator of Pearson's measure of kurtosis for xRA.")
+kurtosis(act$x7RA, na.rm=TRUE)
+
+# LagCmoodC Skewness and Kirtosis
+print("LagCmoodC")
+print("Skewness of xLagCmoodC")
+skewness(act$xLagCmoodC, na.rm=TRUE)
+
+print("Estimator of Pearson's measure of kurtosis for xLagCmoodC")
+kurtosis(act$xLagCmoodC, na.rm=TRUE)
+
+print("Skewness of xxLagCmoodC")
+skewness(act$xxLagCmoodC, na.rm=TRUE)
+
+print("Estimator of Pearson's measure of kurtosis for xxLagCmoodC")
+kurtosis(act$xxLagCmoodC, na.rm=TRUE)
+```
+# * Descriptives *
+```{r}
+summary(act$RA_Sev)
+summary(act$LagCmood_Outliers_Inc)
+summary(act$LagCmoodC_Outliers_Inc)
+
+
+print("SD RA_Sev")
+sd(act$RA_Sev, na.rm = TRUE)
+
+print("SD LagCmoodC_Outliers_Inc")
+sd(act$LagCmoodC_Outliers_Inc, na.rm = TRUE)
+
+print("
+RA7: 
+Mean: 0.93 %.9268
+SD: .02 %.02466
+
+Mood Disregulation Score
+Mean: 28.93
+SD: 7.85 % 7.8538
+")
+
+```
+
+
+# **Assumptions** 
+##1)  Linearity of resituals
+```{r}
+# Residuals plots
+plot(fitted(xUntransformedModel),residuals(xUntransformedModel), main = "Outliers included Residuals Plot")
+
+plot(fitted(xxRAsevSquaredModel),residuals(xxRAsevSquaredModel), main = "xxRAsevSquaredModel Residuals Plot", xlim = range(28:32))
+
+plot(fitted(xxxRAsevCubedModel),residuals(xxxRAsevCubedModel), main = "xxxRAsevCubedModel Residuals Plot", xlim = range(28:32))
+
+```
+
+
+## (1) & (2) Homogeneity of Variance
+```{r}
+plotModel <- plot(xUntransformedModel) #creates a fitted vs residual plot
+plotModel
+hist(residuals(xUntransformedModel))
+
+```
+
+
+```{r}
+#Random data to compare
+plot(rnorm(100),rnorm(100))
+```
+
+
+<!-- Homogenetiy of variance  -->
+<!-- "For this portion of the analysis, we need to revisit about statistical significance - since the assumption is that the variance is not going to differ, we would hope to see NO STATISTICAL DIFFERENCES in the following procedure (i.e. p>0.05) to confirm that:" -->
+```{r}
+# library(modelr)
+# act2$xUntransformedModelResid <- add_residuals(act, xUntransformedModel, var = "resid") #My alternate version to extract the residuals and places them in a new column in our original data table. The code for the website was as follows, but it was giving me an error because of missing data: act$xUntransformedModelResid<- residuals(xUntransformedModel)
+# act2$AbsxUntransformedModelResid <-abs(act2$xUntransformedModelResid) #creates a new column with the absolute value of the residuals
+# act$xUntransformedModelResid2 <- act$Abs.xUntransformedModelResid^2 #squares the absolute values of the residuals to provide the more robust estimate
+# Levene.xUntransformedModel <- lm(xUntransformedModelResid2 ~ subjectID, data=act) #ANOVA of the squared residuals
+# anova(Levene.xUntransformedModel) #displays the results
+```
+
+
+```{r}
+library(car)
+car::ncvTest(xUntransformedModel)
+#  if test has a p-value less that a significance level of 0.05 (it doesn't), we can reject the null hypothesis that the variance of the residuals is constant and infer that heteroscedasticity is indeed present, thereby confirming our graphical inference.
+# MD: If the test has a p-value greater than .05 we cannot reject the null hypohtesis that the variance of the residuals is constant. so we have no evidence to infer that the homoscedasticity assumption my be violeted.
+```
+homoscedasticity is present
+no evidence of heteroscedasticity as p=.052, so we can not reject the null hypothesss
+
+
+# ```{r}
+# library(lmtest)
+# lmtest::bptest(xUntransformedModel)
+# ```
+
+
+## (3) Normality of residuals - *no obvious violations*
+Two ways to test the assumption of normality of residuals,
+(A) histogram or  (B) Q-Q plot of the *residuals* of your modeln.**
+Example writeup from tute) "The histogram is relatively bell-shaped and the Q-Q plot indicates that the data falls on a straight line (which means that it’s similar to a normal distribution). Here, we would conclude that there are no obvious violations of the normality assumption."
+
+(A) Histogram of residuals
+*Looks good - Bell shaped normal distribution!*
+```{r}
+hist(residuals(xUntransformedModel), xlim = range(-30:10), ylim = range(0:200))
+hist(residuals(xxRAsevSquaredModel), xlim = range(-30:10), ylim = range(0:200))
+hist(residuals(xxxRAsevCubedModel), xlim = range(-30:10), ylim = range(0:200))
+```
+(B) Q-Q plot of residuals (to check linearity)
+```{r}
+qqnorm(residuals(xUntransformedModel),ylim = range(-30:10))
+qqnorm(residuals(xxRAsevSquaredModel),ylim = range(-30:10))
+qqnorm(residuals(xxxRAsevCubedModel),ylim = range(-30:10))
+```
+
+```{r}
+#Diagnostic plots.
+# par(mfrow=c(2,2))
+# par(mfrow=c(2,2)) # COMMENT OUT FOR INDIVIDUAL PLOTS
+plot(xUntransformedModel)
+plot(xxRAsevSquaredModel)
+plot(xxxRAsevCubedModel)
+```
+
+# **CUSTOMISABLE MODELLING VARIABLES**
+```{r}
+# For models
+#Run 1
+act$x7RA <- act$RA_Sev_GpMC
+#Run 2
+# act$x7RA <- act$RA_Sev_2sd_per_participant
+# Run 3
+# act$x7RA <- act$RA_Sev_3sd_per_participant
+
+# For models (no C at the end)
+#Run 1
+act$xLagCmood <- act$RSLagCmoodC
+#Run 2
+# act$xLagCmood <- act$LagCmoodC_2sd_per_participant
+# Run 3
+# act$xLagCmood <- act$LagCmoodC_3sd_per_participant
+```
+
+# Modelling
+## Step 1) Compare fixed vs random intercept models to assesses need for MLM
+Need to make sure there is significant variation across contexts.
+Yes there is. BIC went down and Higher value (closer to 0) of -2LL is better fit, and the random intercept model is significantly better fit χ2(1) = 40.893, p < 0.001
+```{r}
+fixedInterceptOnlyAct<-gls(xLagCmood ~ 1, data = act, method = "ML", na.action = na.exclude)
+randomInterceptOnlyAct<-lme(xLagCmood ~ 1, data = act, random = ~1|ID, method = "ML", na.action = na.exclude, control = list(opt="optim"))
+anova(fixedInterceptOnlyAct, randomInterceptOnlyAct)
+```
+
+```{r}
+intervals(randomInterceptOnlyAct, 0.95)
+```
+
+## **19.6.7. Adding in fixed effects 3**
+### Adding RA
+```{r}
+fixedSlopeRandomInterceptRA<-lme(xLagCmood ~ x7RA, data = act, random = ~1|ID, method = "ML", na.action = na.exclude, control = list(opt="optim"))
+summary(fixedSlopeRandomInterceptRA)
+```
+```{r}
+intervals(fixedSlopeRandomInterceptRA, 0.95)
+```
+
+## 19.6.8. Introducing random slopes
+### Random Slope RA only (FINAL MODEL)
+```{r}
+#Normal
+randomSlopeRA<-lme(xLagCmood ~ x7RA, data = act, random = ~x7RA|ID, method = "ML", na.action = na.exclude, control = list(opt="optim"))
+
+#Testing na.omit to troubleshoot missing values
+# randomSlopeRA<-lme(xLagCmood ~ x7RA, data = act, random = ~x7RA|ID, method = "ML", na.action = na.omit, control = list(opt="optim"))
+
+
+# Quadratic
+# randomSlopeRA<-lme(xLagCmood ~ I(x7RA^2), data = act, random = ~x7RA|ID, method = "ML", na.action = na.exclude, control = list(opt="optim"))
+summary(randomSlopeRA)
+```
+Value = fixed effects estimates = coefficient
+```{r}
+intervals(randomSlopeRA, 0.95)
+```
+
+
+
+```{r}
+anova(fixedSlopeRandomInterceptRA,randomSlopeRA)
+```
+
+# Writeup
+1) The relationship between RA averaged over 7 days with following day chronomood showed significant variance in intercepts across participants,
+```{r}
+# @ SD __ CI (__ __)
+intervals(randomInterceptOnlyAct, 0.95, which = "var-cov")
+```
+
+```{r}
+# @ Chi squared (L.Ratio), DF (2nd model - first model), p value
+anova(fixedInterceptOnlyAct, randomInterceptOnlyAct)
+```
+
+2)  However, the slopes for RA did not vary across participants
+SD = 116.16 (95% CI: 59.75, 225.82),
+```{r}
+# @ SD __ CI (__ __)
+#from @ sd(RA_Sev_GpMC_Outliers_Exc)  
+intervals(randomSlopeRA, 0.95, which = "var-cov")
+# No longer needed - summary(randomSlopeRA)
+```
+
+```{r}
+# @ Chi squared (L.Ratio), DF (2nd model - first model), p value
+anova(fixedSlopeRandomInterceptRA,randomSlopeRA)
+```
+      
+ and the slopes and intercepts were not significantly correlated -0.33 (95% CI: -0.85, 0.51).
+```{r}
+# @ SD __ CI (__ __)
+# @ Random Effects: cor((Intercept),RA_Sev_GpMC_Outliers_Exc)
+intervals(randomSlopeRA, 0.95, which = "var-cov")
+```
+
+
+# Fixed Slope Model
+**19.6.7. Adding in fixed effects 3**
+### Adding RA
+```{r}
+summary(fixedSlopeRandomInterceptRA)
+```
+
+# Random slope model
+
+RA averaged over 7 days did not significantly predict following day chronomood, b = -3.99, t(1002) = 	-0.086, p = 0.932,
+```{r}
+# b = (Value), t(DF) = ___, p < ___,
+summary(randomSlopeRA)
+```
+
+
+For table
+```{r}
+summary(fixedInterceptOnlyAct)
+```
+
+```{r}
+summary(randomInterceptOnlyAct)
+```
+
+
+```{r}
+# From the psychometric package
+ICC1.lme(LagCmoodC_Outliers_Inc, ID, act)
+```
+
+# relocate
+# CmoodC Missing data %
+```{r}
+# ***** Count total row numbers
+print("Total data count for CmoodC")
+CmoodC_TotalDataCount<-length(actDrawing$LagCmoodC_Outliers_Inc)
+CmoodC_TotalDataCount
+
+# ***** count missing data numbers
+print("missing data count for CmoodC")
+CmoodC_MissingDataCount<-length(which(is.na(actDrawing$LagCmoodC_Outliers_Inc)))
+CmoodC_MissingDataCount
+
+# ***** divide the two
+print("CmoodC Missing data %")
+CmoodCPercentMissing = CmoodC_MissingDataCount/CmoodC_TotalDataCount
+CmoodCPercentMissing
+```
+
+# RA7 Missing data %
+```{r}
+# ***** Count total row numbers
+print("Total data count for RA7")
+RA7_TotalDataCount<-length(actDrawing$RA_Sev)
+RA7_TotalDataCount
+
+# ***** count missing data numbers
+print("missing data count for RA7")
+RA7_MissingDataCount<-length(which(is.na(actDrawing$RA_Sev)))
+RA7_MissingDataCount
+
+# ***** divide the two
+print("RA7 Missing data %")
+RA7PercentMissing =RA7_MissingDataCount/RA7_TotalDataCount
+RA7PercentMissing
+```
+
+# Final table
+```{r}
+summary(fixedInterceptOnlyAct)
+intervals(fixedInterceptOnlyAct, 0.95)
+```
+
+```{r}
+summary(randomInterceptOnlyAct)
+intervals(randomInterceptOnlyAct, 0.95)
+```
+
+```{r}
+summary(fixedSlopeRandomInterceptRA)
+intervals(fixedSlopeRandomInterceptRA, 0.95)
+```
+
+```{r}
+summary(randomSlopeRA)
+intervals(randomSlopeRA, 0.95)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
