@@ -10,7 +10,6 @@ This document provides a succinct summary of the statistical methods employed in
 The overarching aim of the study was to investigate whether an actigraphy
 derived measure of circadian rhythm robustness can predict a clinically important measure of mood dysregulation in Bipolar Disorder. 
 This aim was motivated by the potential to develop a useful tool to provide critical early warning signs in Bipolar Disorder. Secondary data analyses were conducted on a unique repeated measures dataset containing continuous actigraphy and self-report daily mood data collected from a small sample of people with Bipolar Disorder. A multilevel modelling approach was used to test whether a new actigraphy-based measure of circadian robustness could prospectively predict a new measure of self-reported mood dysregulation in the dataset. Specifically, it was hypothesised that Relative Amplitude of the circadian rhythm (RA) averaged across the previous week (RA7) would significantly predict the following days’ Mood Dysregulation score.
----
 
 ## Table of Contents
 
